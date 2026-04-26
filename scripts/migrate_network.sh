@@ -20,69 +20,54 @@ _write_iwd_profile() {
     profile="/var/lib/iwd/=$(printf '%s' "$ssid" | od -A n -t x1 | tr -d ' \n').psk"
   fi
 
-  # Write iwd profile with appropriate permissions
   {
-    printf '%s\n' "[Security]"
+    echo "[Security]"
     if [[ "$psk" =~ ^[0-9a-fA-F]{64}$ ]]; then
-      printf '%s\n' "PreSharedKey=${psk}"
+      echo "PreSharedKey=${psk}"
     else
-      printf '%s\n' "Passphrase=${psk}"
+      echo "Passphrase=${psk}"
     fi
-    printf '%s\n' "" "[Settings]" "AutoConnect=true" ""
+    echo ""
+    echo "[Settings]"
+    echo "AutoConnect=true"
   } | sudo tee "$profile" > /dev/null
 
   sudo chmod 600 "$profile"
-  sync "$profile" # Ensure data is written to disk
   echo "Migrated: $ssid -> $profile"
 }
 
 if [[ -f /etc/network/interfaces ]]; then
-  ssid=""; psk=""
+  ssid=$(sed -n 's/^[[:space:]]*wpa-ssid[[:space:]]\+//p' /etc/network/interfaces | head -n1)
+  psk=$(sed -n 's/^[[:space:]]*wpa-psk[[:space:]]\+//p' /etc/network/interfaces | head -n1)
 
-  # Read /etc/network/interfaces line by line, looking for wifi stanzas and credentials
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    if [[ "$line" =~ ^(auto|allow-hotplug|iface|mapping|source)[[:space:]] ]]; then
-      [[ -n "$ssid" && -n "$psk" ]] && _write_iwd_profile "$ssid" "$psk"
-      ssid=""; psk=""
-    fi
+  # Strip surrounding quotes if present
+  ssid="${ssid#\"}"; ssid="${ssid%\"}"
 
-    if [[ "$line" =~ ^[[:space:]]+wpa-ssid[[:space:]]+\"([^\"]+)\" ]]; then
-      ssid="${BASH_REMATCH[1]}"
-    elif [[ "$line" =~ ^[[:space:]]+wpa-ssid[[:space:]]+([^[:space:]#]+) ]]; then
-      ssid="${BASH_REMATCH[1]}"
-    elif [[ "$line" =~ ^[[:space:]]+wpa-psk[[:space:]]+([^[:space:]#]+) ]]; then
-      psk="${BASH_REMATCH[1]}"
-    fi
-  done < /etc/network/interfaces
-
-  # Handle last profile if file doesn't end with a blank line
   [[ -n "$ssid" && -n "$psk" ]] && _write_iwd_profile "$ssid" "$psk"
 fi
 
-# Identify wifi interfaces to remove from /etc/network/interfaces and disable wpa_supplicant services
-wifi_ifaces=()
+# Identify wifi interfaces.
+wifi_ifaces=""
 for p in /sys/class/net/*/wireless; do
   [[ -d "$p" ]] || continue
   iface="${p%/wireless}"
   iface="${iface##*/}"
-  wifi_ifaces+=("$iface")
+  wifi_ifaces="$wifi_ifaces $iface"
 done
 
-# Remove wifi stanzas from /etc/network/interfaces to prevent conflicts with iwd.
-# We only do this if we found wifi interfaces and the file exists, to avoid unnecessary modifications.
-if [[ -f /etc/network/interfaces && ${#wifi_ifaces[@]} -gt 0 ]]; then
-  awk_script='BEGIN { for(i=2;i<ARGC;i++) w[ARGV[i]]=1; ARGC=2 }
+# Remove wifi stanzas from /etc/network/interfaces.
+if [[ -f /etc/network/interfaces && -n "$wifi_ifaces" ]]; then
+  sudo awk -v list="$wifi_ifaces" '
+    BEGIN { split(list, a); for(i in a) w[a[i]]=1 }
     /^(allow-hotplug|auto)[[:space:]]/ { if(w[$2]) next }
     /^iface[[:space:]]/ { skip=(w[$2]?1:0); if(skip) next }
     skip && (/^[[:space:]]/ || /^$/) { next }
-    { skip=0; print }'
-
-  sudo awk "$awk_script" /etc/network/interfaces "${wifi_ifaces[@]}" | \
-    sudo tee /etc/network/interfaces.tmp > /dev/null
+    { skip=0; print }
+  ' /etc/network/interfaces | sudo tee /etc/network/interfaces.tmp > /dev/null
   sudo mv /etc/network/interfaces.tmp /etc/network/interfaces
 fi
 
-# Disable wpa_supplicant services to prevent conflicts with iwd.
+# Disable wpa_supplicant, enable iwd.
 sudo systemctl disable wpa_supplicant 2>/dev/null || true
 sudo systemctl mask wpa_supplicant
 
