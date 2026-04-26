@@ -1,4 +1,7 @@
-# Write iwd main config - always overwrite to guarantee EnableNetworkConfiguration.
+# Stop running wpa_supplicant to free the interface before reboot.
+sudo systemctl stop wpa_supplicant 2>/dev/null || true
+
+# Write iwd main config.
 sudo mkdir -p /etc/iwd
 sudo tee /etc/iwd/main.conf > /dev/null << 'EOF'
 [General]
@@ -10,7 +13,7 @@ EOF
 
 sudo mkdir -p /var/lib/iwd
 
-# Migrate wifi credentials from /etc/network/interfaces to iwd PSK profiles.
+# Migrate wifi credentials.
 _write_iwd_profile() {
   local ssid="$1" psk="$2" profile
 
@@ -40,7 +43,6 @@ if [[ -f /etc/network/interfaces ]]; then
   ssid=$(sed -n 's/^[[:space:]]*wpa-ssid[[:space:]]\+//p' /etc/network/interfaces | head -n1)
   psk=$(sed -n 's/^[[:space:]]*wpa-psk[[:space:]]\+//p' /etc/network/interfaces | head -n1)
 
-  # Strip surrounding quotes if present
   ssid="${ssid#\"}"; ssid="${ssid%\"}"
 
   [[ -n "$ssid" && -n "$psk" ]] && _write_iwd_profile "$ssid" "$psk"
@@ -57,6 +59,8 @@ done
 
 # Remove wifi stanzas from /etc/network/interfaces.
 if [[ -f /etc/network/interfaces && -n "$wifi_ifaces" ]]; then
+  sudo cp /etc/network/interfaces /etc/network/interfaces.bak
+
   sudo awk -v list="$wifi_ifaces" '
     BEGIN { split(list, a); for(i in a) w[a[i]]=1 }
     /^(allow-hotplug|auto)[[:space:]]/ { if(w[$2]) next }
@@ -67,7 +71,7 @@ if [[ -f /etc/network/interfaces && -n "$wifi_ifaces" ]]; then
   sudo mv /etc/network/interfaces.tmp /etc/network/interfaces
 fi
 
-# Disable wpa_supplicant, enable iwd.
+# Disable wpa_supplicant.
 sudo systemctl disable wpa_supplicant 2>/dev/null || true
 sudo systemctl mask wpa_supplicant
 
@@ -78,12 +82,18 @@ for p in /sys/class/net/*/wireless; do
   sudo systemctl mask "wpa_supplicant@${iface}.service" 2>/dev/null || true
 done
 
+# Enable iwd and resolved.
 sudo systemctl unmask iwd
 sudo systemctl enable iwd
 
 if systemctl cat systemd-resolved &>/dev/null; then
   sudo systemctl unmask systemd-resolved
   sudo systemctl enable systemd-resolved
+
+  # Ensure DNS resolution works after reboot.
+  if [[ -L /etc/resolv.conf ]] || [[ -f /etc/resolv.conf ]]; then
+    sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+  fi
 fi
 
 sudo systemctl disable systemd-networkd-wait-online.service 2>/dev/null || true
