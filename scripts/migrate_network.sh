@@ -1,4 +1,4 @@
-# Write iwd main config - always overwrite to guarantee EnableNetworkConfiguration
+# Write iwd main config
 sudo mkdir -p /etc/iwd
 sudo tee /etc/iwd/main.conf > /dev/null << 'EOF'
 [General]
