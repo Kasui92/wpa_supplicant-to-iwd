@@ -36,8 +36,8 @@ _write_iwd_profile() {
 }
 
 if [[ -f /etc/network/interfaces ]]; then
-  ssid=$(sed -n 's/^[[:space:]]*wpa-ssid[[:space:]]\+//p' /etc/network/interfaces | head -n1)
-  psk=$(sed -n 's/^[[:space:]]*wpa-psk[[:space:]]\+//p' /etc/network/interfaces | head -n1)
+  ssid=$(sudo sed -n 's/^[[:space:]]*wpa-ssid[[:space:]]\+//p' /etc/network/interfaces | head -n1)
+  psk=$(sudo sed -n 's/^[[:space:]]*wpa-psk[[:space:]]\+//p' /etc/network/interfaces | head -n1)
 
   ssid="${ssid#\"}"; ssid="${ssid%\"}"
 
@@ -69,7 +69,7 @@ if [[ -f /etc/network/interfaces && -n "$wifi_ifaces" ]]; then
   sudo mv /etc/network/interfaces.tmp /etc/network/interfaces
 fi
 
-# Disable wpa_supplicant. Mask may fail if package not installed
+# Disable wpa_supplicant
 sudo systemctl disable wpa_supplicant 2>/dev/null || true
 sudo systemctl mask wpa_supplicant 2>/dev/null || true
 
