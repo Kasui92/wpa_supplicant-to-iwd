@@ -31,7 +31,6 @@ _write_iwd_profile() {
   } | sudo tee "$profile" > /dev/null
 
   sudo chmod 600 "$profile"
-  sync "$profile"
   echo "Migrated: $ssid -> $profile"
 }
 
