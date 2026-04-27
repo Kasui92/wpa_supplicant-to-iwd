@@ -1,20 +1,19 @@
 #!/bin/bash
 
-set -o pipefail
+set -eEo pipefail
 
-
-echo -e "\e[32mStarting script installation...\e[0m"
-sudo apt-get update >/dev/null
-sudo apt-get install -y git >/dev/null
-
-# Use custom repo if specified, otherwise use default
+export SCRIPT_PATH="$HOME/wpa_supplicant-to-iwd"
 SCRIPT_REPO="Kasui92/wpa_supplicant-to-iwd"
 
-echo -e "\nCloning script from: https://github.com/${SCRIPT_REPO}.git"
-git clone https://github.com/$SCRIPT_REPO.git >/dev/null
+echo -e "\e[32mStarting installation...\e[0m"
 
-cd ~/wpa_supplicant-to-iwd
-cd -
+if [[ ! -d "$SCRIPT_PATH" ]]; then
+  sudo apt-get update >/dev/null
+  sudo apt-get install -y git >/dev/null
+  echo -e "\nCloning from: https://github.com/${SCRIPT_REPO}.git"
+  git clone "https://github.com/$SCRIPT_REPO.git" "$SCRIPT_PATH" >/dev/null
+fi
 
-echo -e "\nRunning install script..."
-source ~/wpa_supplicant-to-iwd/install.sh
+source "$SCRIPT_PATH/scripts/mask_network.sh"
+source "$SCRIPT_PATH/scripts/install_packages.sh"
+source "$SCRIPT_PATH/scripts/migrate_network.sh"
