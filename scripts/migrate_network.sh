@@ -1,7 +1,4 @@
-# Stop running wpa_supplicant to free the interface before reboot.
-sudo systemctl stop wpa_supplicant 2>/dev/null || true
-
-# Write iwd main config.
+# Write iwd main config - always overwrite to guarantee EnableNetworkConfiguration
 sudo mkdir -p /etc/iwd
 sudo tee /etc/iwd/main.conf > /dev/null << 'EOF'
 [General]
@@ -13,7 +10,7 @@ EOF
 
 sudo mkdir -p /var/lib/iwd
 
-# Migrate wifi credentials.
+# Migrate wifi credentials from /etc/network/interfaces to iwd PSK profiles
 _write_iwd_profile() {
   local ssid="$1" psk="$2" profile
 
@@ -24,18 +21,17 @@ _write_iwd_profile() {
   fi
 
   {
-    echo "[Security]"
+    printf '%s\n' "[Security]"
     if [[ "$psk" =~ ^[0-9a-fA-F]{64}$ ]]; then
-      echo "PreSharedKey=${psk}"
+      printf '%s\n' "PreSharedKey=${psk}"
     else
-      echo "Passphrase=${psk}"
+      printf '%s\n' "Passphrase=${psk}"
     fi
-    echo ""
-    echo "[Settings]"
-    echo "AutoConnect=true"
+    printf '%s\n' "" "[Settings]" "AutoConnect=true"
   } | sudo tee "$profile" > /dev/null
 
   sudo chmod 600 "$profile"
+  sync "$profile"
   echo "Migrated: $ssid -> $profile"
 }
 
@@ -45,10 +41,12 @@ if [[ -f /etc/network/interfaces ]]; then
 
   ssid="${ssid#\"}"; ssid="${ssid%\"}"
 
-  [[ -n "$ssid" && -n "$psk" ]] && _write_iwd_profile "$ssid" "$psk"
+  if [[ -n "$ssid" && -n "$psk" ]]; then
+    _write_iwd_profile "$ssid" "$psk"
+  fi
 fi
 
-# Identify wifi interfaces.
+# Identify wifi interfaces
 wifi_ifaces=""
 for p in /sys/class/net/*/wireless; do
   [[ -d "$p" ]] || continue
@@ -57,7 +55,7 @@ for p in /sys/class/net/*/wireless; do
   wifi_ifaces="$wifi_ifaces $iface"
 done
 
-# Remove wifi stanzas from /etc/network/interfaces.
+# Remove wifi stanzas from /etc/network/interfaces
 if [[ -f /etc/network/interfaces && -n "$wifi_ifaces" ]]; then
   sudo cp /etc/network/interfaces /etc/network/interfaces.bak
 
@@ -71,9 +69,9 @@ if [[ -f /etc/network/interfaces && -n "$wifi_ifaces" ]]; then
   sudo mv /etc/network/interfaces.tmp /etc/network/interfaces
 fi
 
-# Disable wpa_supplicant.
+# Disable wpa_supplicant. Mask may fail if package not installed
 sudo systemctl disable wpa_supplicant 2>/dev/null || true
-sudo systemctl mask wpa_supplicant
+sudo systemctl mask wpa_supplicant 2>/dev/null || true
 
 for p in /sys/class/net/*/wireless; do
   [[ -d "$p" ]] || continue
@@ -82,19 +80,19 @@ for p in /sys/class/net/*/wireless; do
   sudo systemctl mask "wpa_supplicant@${iface}.service" 2>/dev/null || true
 done
 
-# Enable iwd and resolved.
-sudo systemctl unmask iwd
-sudo systemctl enable iwd
+# Enable iwd
+sudo systemctl unmask iwd 2>/dev/null || true
+sudo systemctl enable iwd 2>/dev/null || true
 
+# Enable resolved only if installed
 if systemctl cat systemd-resolved &>/dev/null; then
-  sudo systemctl unmask systemd-resolved
-  sudo systemctl enable systemd-resolved
+  sudo systemctl unmask systemd-resolved 2>/dev/null || true
+  sudo systemctl enable systemd-resolved 2>/dev/null || true
 
-  # Ensure DNS resolution works after reboot.
   if [[ -L /etc/resolv.conf ]] || [[ -f /etc/resolv.conf ]]; then
-    sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+    sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf 2>/dev/null || true
   fi
 fi
 
 sudo systemctl disable systemd-networkd-wait-online.service 2>/dev/null || true
-sudo systemctl mask systemd-networkd-wait-online.service
+sudo systemctl mask systemd-networkd-wait-online.service 2>/dev/null || true
